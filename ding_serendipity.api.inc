@@ -1,6 +1,4 @@
 <?php
-// $id$
-
 /**
  * @file
  * This file contains the api functions which developers can use to

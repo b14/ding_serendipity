@@ -1,6 +1,4 @@
 <?php
-// $id$ 
-
 /**
  * @file
  * Proxy module assembling serendipity from sub modules

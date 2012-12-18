@@ -1,11 +1,9 @@
-; $Id$
 name = Ding serendipity
 description = Collection of entities from different sources based on user context
 package = Ding!
 version = "7.x-1.x-dev"
 core = 7.x
 files[] = ding_serendipity.module
-;files[] = tests/ding_serendipity.test
 dependencies[] = ding_provider
 dependencies[] = ding_base
 dependencies[] = ding_popup

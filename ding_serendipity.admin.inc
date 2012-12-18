@@ -1,6 +1,4 @@
 <?php
-// $id$ 
-
 /**
  * @file
  * This file contains admin forms and functionality related to the ding_serendipity admin interface.
@@ -48,9 +46,5 @@ function ding_serendipity_admin_form($form, &$form_state) {
     }
   }
   
-  // $form['submit'] = array(
-    // '#type' => 'submit',
-    // '#value' => t('Save')
-  // );
   return $form;
 }
