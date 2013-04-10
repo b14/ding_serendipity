@@ -9,6 +9,19 @@
  * Hook to define a serendipity "action"
  * 
  * @return array
+ *   An array of serendipity definitions, each of which describe a serendipity
+ *   function with the name: module_name . '_' . machine_name . '_serendipity_add'
+ *   The definition is required to have the following values:
+ *   - "title": The title of the serendipity function
+ *   - "description": A description of what the serendipity function provides and when it is applied.
+ *   - "context keys": An array of context keys which define the context required before the function
+ *     is called by the serendipity module.
+ *   The definition can also include the following values:
+ *   - "callback": This difines an alternative callback function which replaces the default:
+ *     "module_name . '_' . machine_name . '_serendipity_add'".
+ *   - "access callback": This defines an alternate access callback function which replaces the default:
+ *     "ding_serendipity_access". The access function determines when the serendipity function is applied.
+ *   - "file": Path to a file where the serendipity function is written.
  */
 function hook_serendipity_info() {
   return array(
@@ -36,3 +49,11 @@ function hook_serendipity_context_alter(&$context) {
 function hook_serendipity_results_alter(&$context) {
   // Alter the content
 }
+
+/**
+ * Add results to the serendipity result to prevent empty lists.
+ */
+function hook_serendipity_fallback($context) {
+  // Add fallback content based on the context
+}
+

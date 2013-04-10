@@ -13,8 +13,23 @@ function ding_serendipity_menu() {
   // Serendipity admin page
   $items['admin/config/ding/serendipity'] = array(
     'title' => 'Ding serendipity',
+    'description' => 'Ding serendipity settings and overview',
     'page callback' => 'drupal_get_form',
     'page arguments' => array('ding_serendipity_admin_form'),
+    'access arguments' => array('administer ding serendipity'),
+    'file' => 'ding_serendipity.admin.inc'
+  );
+  $items['admin/config/ding/serendipity/settings'] = array(
+    'title' => 'Settings',
+    'description' => 'View serendipity specific settings',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -90,
+  );
+  $items['admin/config/ding/serendipity/key_overview'] = array(
+    'title' => 'Key overview',
+    'description' => 'Get an overview of the current registered serendipity functions and keys',
+    'type' => MENU_LOCAL_TASK,
+    'page arguments' => array('ding_serendipity_admin_overview'),
     'access arguments' => array('administer ding serendipity'),
     'file' => 'ding_serendipity.admin.inc'
   );
@@ -31,61 +46,6 @@ function ding_serendipity_permission() {
       'title' => t('Administer Ding serendipity'),
     ),
   );
-}
-
-/**
- * implements hook_block_info
- */
-function ding_serendipity_block_info() {
-
-  $blocks['serendipity_block'] = array(
-    'info' => t('Serendipity'),
-  );
-
-  return $blocks;
-}
-
-/**
- * implements hook_block_configure
- */
-function ding_serendipity_block_configure($delta = '') {
-  // This example comes from node.module.
-  $form = array();
-  switch ($delta) {
-    case 'serendipity_block':
-      $form['serendipity_display_count'] = array(
-        '#type' => 'select',
-        '#title' => t('Number of recent content items to display'),
-        '#default_value' => variable_get('serendipity_display_count', 2),
-        '#options' => drupal_map_assoc(array(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 25, 30)),
-      );
-      break;
-  }
-  return $form;
-}
-
-/**
- * implements hook_block_view
- */
-function ding_serendipity_block_view($delta) {
-  $block = array();
-  switch ($delta) {
-    case 'serendipity_block':
-      $max = variable_get('serendipity_display_count', 2);
-      $result = ding_serendipity_render(
-        array(
-          'id_lists' => array(
-            'ting_object' => array('714700:25882008', '714700:21820199', '714700:23685787')
-          )
-        ),
-        array('view_mode' => 'teaser')
-      );
-      //$content = array_slice($results, 0, $max);
-      $block['subject'] = NULL;
-      $block['content'] = $result;
-      break;
-  }
-  return $block;
 }
 
 /**
@@ -125,75 +85,101 @@ function ding_serendipity_get_info() {
 /**
  * Collect content matching the given context.
  * Results are cached by context for 10 minutes.
+ * 
+ * @param array $context
+ *   Possible option values are:
+ *     - "view_mode": The view mode to use when viewing the content collected through serendipity.
+ *     - "sort_weight": If true the collected content will be sorted by weight.
+ *     - "max": The maximum amount of items in the final content array.
+ *     - "min": The minimum amount of items in the content array, if there are fewer system will try to
+ *              add content from the fallback hook.
+ *     - "random": If true the results will be randomized.
+ *   The other context values should be keys which represent the context of this call as well as additional
+ *   values which are valuable for the serendipity function. A list of active keys can be seen on the serendipity
+ *   admin page: /admin/config/ding/serendipity/key_overview. If the values for any given key is a token the 
+ *   the ding_serendipity_serendipity_context_alter function will replace this value with the appropriate 
+ *   value from the url if applicable.
+ * @see ding_serendipity_access
+ *   This default access callback uses the keys of the context array to compare with the keys from 
+ *   hook_serendipity_info to determine if a serendipity function is eligible to provide content.
  *
- * @return Array $results
+ * @return array $results
  */
 function ding_serendipity_fetch($context = NULL) {
   // Allow modules to modify the provided context
   drupal_alter('serendipity_context', $context);
 
-  // Caching of serendipity  
-  $cache_id = implode(':', $context);
-
-  $cache = cache_get($cache_id, 'cache_variable');
-  if (!empty($cache) && time() < $cache->expire) {
-    $cache->data['source'] = 'cache:' . REQUEST_TIME . ':' . $cache->expire . '<br/>';
-    return $cache->data;
+  if(variable_get('ding_serendipity_enable_cache', FALSE)) {
+    // Caching of serendipity  
+    $cache_id = implode(':', $context);
+  
+    $cache = cache_get($cache_id, 'cache_variable');
+    if (!empty($cache) && REQUEST_TIME < $cache->expire) {
+      $cache->data['cache'] =  REQUEST_TIME . ':' . $cache->expire . '<br/>';
+      return $cache->data;
+    }
   }
   
-  // Get serendipity info
+  // Collect all serendipity plugins
   $info = ding_serendipity_get_info();
   $results = array(
     'source' => 'raw',
     'items' => array(),
+    'context' => $context,
+    'plugins' => $info,
   );
+
   $isslow = FALSE;
-  if (is_array($info)) {
-    foreach ($info as $name => $values) {
-      
-      // Skip additional serendipity hooks if we have already spent too much time
-      if (isslow('serendipity', 5)) {
-        $isslow = TRUE;
-        break;
-      }
-
-      if (!empty($values['keys'])) {
-        $content = array();
-        // Determine access to the current serendipity result
-        if (call_user_func($values['access callback'], $context, $values['keys'])) {
-          // If access is accepted then determine if the #callback function exists.
-          if (function_exists($values['callback'])) {
-            // If it is found get content from the #callback function.
-
-            $content = call_user_func($values['callback'], $context);
-          }
-          else {
-            // If the #callback function could not be found commit a watchdog warning.
-            $path = drupal_get_path('module', $values['module']);
-            watchdog('ding_serendipity', "Serendipity can't find function: @func", array('@func' => $values['callback']), WATCHDOG_WARNING, $path);
-            drupal_set_message(t("Serendipity can't find function: @func", array('@func' => $values['callback'])), 'error');
-          }
-        }
-
-        // Append source information
-        foreach ($content as $index => $item) {
-          $content[$index]['source'] = $values;
-        }
-        $results['items'] = array_merge($results['items'], $content);
-      }
+  foreach ($info as $name => $values) {
+    
+    // Skip additional serendipity hooks if we have already spent too much time
+    if (ding_serendipity_isslow('serendipity', variable_get('ding_serendipity_isslow_timeout', 10))) {
+      $isslow = TRUE;
+      $results['is_slow'] = true;
+     break;
     }
 
-    // Allow for alteration of the results.
-    drupal_alter('serendipity_results_alter', $results);
+    $content = array();
+    // Determine access to the current serendipity result
+    if (call_user_func($values['access callback'], $context, $values['keys'])) {
+      // If access is accepted then determine if the #callback function exists.
+      if (function_exists($values['callback'])) {
+        // If it is found get content from the #callback function.
+
+        $content = call_user_func($values['callback'], $context);
+      }
+      else {
+        // If the #callback function could not be found commit a watchdog warning.
+        $path = drupal_get_path('module', $values['module']);
+        watchdog('ding_serendipity', "Serendipity can't find function: @func", array('@func' => $values['callback']), WATCHDOG_WARNING, $path);
+        drupal_set_message(t("Serendipity can't find function: @func", array('@func' => $values['callback'])), 'error');
+      }
+    } else {
+      $results['plugins'][$name]['status'] = "No access";
+    }
+
+
+    // Append source information
+    // The 'info' array may contain all sorts of extra details on the resulting object
+    // Info is kept seperate to preserve caching of objects
+    foreach ($content as $index => $item) {
+      $content[$index]['source'] = $values;
+      $content[$index]['source']['info'] = isset($content[$index]['info']) ? $content[$index]['info'] : array(); 
+    }
+    $results['items'] = array_merge($results['items'], $content);
   }
+
+  // Allow for alteration of the results.
+  // Removing items are recommended in this hook
+  drupal_alter('ding_serendipity_results', $results);
   
   // Sort the array by it's ['weight'].
-  if ($context['sort_weight'] === TRUE && !empty($results['items'])) {
+  if ($context['sort_weight'] == TRUE && !empty($results['items']) && !$context['random']) {
     uasort($results['items'], 'drupal_sort_weight');
   }
 
   // Randomize will overwrite sort_weight.
-  if ($context['random'] === TRUE) {
+  if ($context['random'] == TRUE) {
     shuffle($results['items']);
   }
 
@@ -203,15 +189,25 @@ function ding_serendipity_fetch($context = NULL) {
   }
   
   // Skip caching of partial results
-  if (!$isslow) {
-    $expire = 600;
+  if (!$isslow && variable_get('ding_serendipity_enable_cache', FALSE)) {
+    $expire = variable_get('ding_serendipity_cache_lifetime', 600);
     cache_set($cache_id, $results, 'cache_variable', REQUEST_TIME + $expire);
   }
+    
   return $results;
 }
 
 /**
  * Default serendipity access function
+ *
+ * @param array $context
+ *   An array of key => value pairs where the keys possible context values.
+ * @param array keys
+ *   An array of values representing the context values with have to be present before 
+ *   the current serendipity function is called.
+ *
+ * @return boolean
+ *   Return true if all the values in the keys array are present in the context array.
  */
 function ding_serendipity_access($context = array(), $keys = array()) {
   $result = array_intersect(array_keys($context), $keys);
@@ -257,10 +253,25 @@ function ding_serendipity_serendipity_context_alter(&$context) {
 
 /**
  * Get a render array for the context.
+ *
+ * @param array $context
+ *   An array of context and option values.
+ *   Possible option values are:
+ *     - "view_mode": The view mode to use when viewing the content collected through serendipity.
+ *     - "sort_weight": If true the collected content will be sorted by weight.
+ *     - "max": The maximum amount of items in the final content array.
+ *     - "min": The minimum amount of items in the content array, if there are fewer system will try to
+ *              add content from the fallback hook.
+ *     - "random": If true the results will be randomized.
+ *   The other context values should be keys which represent the context of this call as well as additional
+ *   values which are valuable for the serendipity function. A list of active keys can be seen on the serendipity
+ *   admin page: /admin/config/ding/serendipity/key_overview.
+ * 
+ * @return array $results
  */
 function ding_serendipity_render($context = NULL) {
   global $user;
-  $result = array();
+  $rendered = array();
     
   // Fill in the default options.
   $context += array(
@@ -269,30 +280,30 @@ function ding_serendipity_render($context = NULL) {
     'max' => 0,
     'min' => 0,
     'random' => FALSE,
-    'distinct' => TRUE // <-- It seems that _load_multiple automatically distincts.
   );
   
   // Fetch the list of ids from all serendipity plugins based on $context
-  $list = ding_serendipity_fetch($context);
-
-  $items = $list['items'];
-
+  $results = ding_serendipity_fetch($context);
+  
+  $items = $results['items'];
+  
   // Jump ship if we have no results.
   if (empty($items)) {
     return array();
   }
 
   // Remove any exceeding items.
-  if ($context['max'] > 0 && count($items) > $context['max']) { //  && !$debug_all) { <-- debug_all only exists here?
+  if ($context['max'] > 0 && count($items) > $context['max']) {
     array_splice($items, $context['max']);
   }
 
   // Combine all the ids of a single entity type, so we can utilize the
   // ENTITY_load_multiple() function.
-  $source = array();
+  $sources = array();
+  $load_multiple = array();
   foreach ($items as $item) {
     $load_multiple[$item['type']][] = rawurldecode($item['id']);
-    $source[$item['type'] . '_' . rawurldecode($item['id'])] = $item['source'];
+    $sources[$item['type'] . '_' . rawurldecode($item['id'])] = $item['source'];
   }
   
   // Add the render arrays to the result.
@@ -300,19 +311,39 @@ function ding_serendipity_render($context = NULL) {
     // Get the objects of the current entity type.
     // And run through the all the objects, using the ENTITY_view() function to
     // get the render array.
-    $objects = call_user_func($type . '_load_multiple', $ids);
+    $conditions = array();
+    if($type == 'ting_object') {
+      $conditions['ding_entity_id'] = $ids;
+      $ids = FALSE;
+    }
+    $objects = entity_load($type, $ids, $conditions);
     foreach ($objects as $oid => $object) {
-      $content = call_user_func($type . '_view', $object, $context['view_mode']);
+      $content = entity_view($type, array($object), $context['view_mode']);
+      // Eliminate the type & id arrays
+      $content = current(current($content));
       $iid = $oid;
       if (!empty($object->ding_entity_type) && $object->ding_entity_type == 'ding_entity') {
         $iid = $object->ding_entity_id;
       }
-      $content['#source'] = $list['source'] . ' > ' . $source[$type . '_' . $iid]['title'];
-      $result[] = $content;
+
+      // Extract optional source information ( via ?debug=s )
+      if (isset($_GET['debug']) && $_GET['debug'] == 's') {
+        $source = $sources[$type . '_' . $iid];
+        $content['#source'] = $results['source'] . ' > ' . $source['title'] ;
+        if (isset($source['info'])) {
+          foreach($source['info'] as $key => $value) {
+            $content['#source'] .= "<br/>$key : $value ";
+          }
+        }
+      }
+      $rendered[] = $content;
     }
   }
   
-  return $result;
+  if (isset($_GET['debug']) && $_GET['debug']=='s') {
+    b14dpm(-1,$results);
+  }
+  return $rendered;
 }
 
 /**
@@ -326,6 +357,11 @@ function ding_serendipity_ctools_plugin_directory($module, $plugin) {
 
 /**
  * Append non serendipity content to assure number of items
+ *
+ * @param array $list
+ *   The list of collected content to be filled with fallback content.
+ * @param array $context
+ *   The current context array.
  */
 function ding_serendipity_append_fallback(&$list, $context) {
 
@@ -334,115 +370,75 @@ function ding_serendipity_append_fallback(&$list, $context) {
     return;
   }
 
-  // Prevent doublettes of ids
   $ids = array();
   foreach ($list as $item) {
     $ids[] = $item['id'];
   }
-  
-  // Handle ting objects
-  // We assume that if no inspiration is found, at least recent materials exists
-  if (isset($context['bundle']) && $context['bundle'] == 'ting_object') {
-    $context['recent'] = TRUE;
-    $fallback = ding_serendipity_taxonomy_term_recent_serendipity_add($context);
-
-    foreach ($fallback as $item) {
-      $item['source'] = array(
-        'title' => 'Fallback ting content',
-        'description' => 'Fallback content are provided to meet minimum count of result.',
-        'keys' => array('fallback'),
-      );
-      $list[] = $item;
-    }
-  }
-  
-  // @todo: handle other entities than node (nid)
-  if (!isset($context['entity_type']) || $context['entity_type'] != 'node') {
-    return;
-  }
-
-  $query = new EntityFieldQuery();
-
-  $query->entityCondition('entity_type', $context['entity_type']);
-  if ($context['bundle']) {
-    $query->entityCondition('bundle', $context['bundle']);
-  }
-  if ($context['entity_type'] == 'node') {
-    $query->propertyCondition('status', 1);
-  }
-
-  if (count($ids)) {
-    // @todo: handle other entities than node (nid)
-    $query->propertyCondition('nid', $ids, 'NOT IN');
-  }
-
-  $query->range(0, $limit)
-    ->addMetaData('account', user_load(1)); // @todo: Run the query as user 1?
-
-  $result = $query->execute();
-  foreach ($result[$context['entity_type']] as $item) {
-    $list[] = array(
-      'type' => 'node',
-      'id' => $item->nid,
-      // Fake a source description
-      'source' => array(
-        'title' => 'Fallback content',
-        'description' => 'Fallback content are provided to meet minimum count of result.',
-        'keys' => array('fallback'),
-      ),
-    );
-  }
+  $items = module_invoke_all('serendipity_fallback', $ids, $context);
+  $list = array_merge($list, $items);
 }
 
 /**
- * Search and format a TingClientSearchResult query
+ * Ask if something is to slow.
  *
- * @param $query 
- *  TingClientSearchResult query string
+ * The way this works is, you either use the default $group, or you make up
+ * your own.
+ * The first time a you test a group (which in the default group is in an init
+ * hook), the timestamp is saved. Next time you check the group it tells you if
+ * you've exceeded your max time since the first call.
  *
- * @param $options
- *  Search options
- *    limit   - Maximum number of items in outpur
- *    shuffle - Shuffle result before limiting
- *    page    -
- *    count   -
- *    options->sort - Ting sort order
+ * @param $group
+ *   The name of the group. The default group name is 'default', use this if
+ *   you want to use the default group, but with a different max time.
+ * @param $time
+ *   This is the max amount of time you want to pass since your first call.
+ * 
+ * @return
+ *   Returns TRUE if your script is to slow, and FALSE if you're withing your
+ *   boundaries.
  */
-function ding_serendipity_do_search($query, $options = array()) {
-  $results = array();
-  // Fill in the default options.
-  $options += array(
-    'limit' => 4,
-    'shuffle' => TRUE,
-    'page' => 1,
-    'count' => 20,
-    'options' => array(
-      'sort' => '',
-    ),
-  );
-  module_load_include('inc', 'ting', 'ting.client');
+function ding_serendipity_isslow($group = 'default', $time = 5) {
+  $groups = &drupal_static(__FUNCTION__, array());
   
+  if (!isset($groups[$group])) {
+    $groups[$group] = microtime(TRUE);
+  }
+  
+  $too_slow = (microtime(TRUE) - $groups[$group]) > $time;
+  
+  if ($too_slow) {
+    // Debugging if it's too slow.
+    $backtrace = debug_backtrace();
+    if(user_access('access devel information')) {
+      drupal_set_message(t(
+        'isslow(@group) @func():@line',
+        array(
+          '@func' => $backtrace[1]['function'],
+          '@line' => $backtrace[1]['line'],
+          '@group' => $group
+        )
+      ));
+    }
+    watchdog(
+      'Is slow', 
+      'isslow(@group) @func():@line',
+      array(
+        '@func' => $backtrace[1]['function'],
+        '@line' => $backtrace[1]['line'],
+        '@group' => $group,
+      ), 
+      WATCHDOG_ALERT
+    );
+  }
+  
+  return $too_slow;
+}
 
-  $search_result = ting_do_search($query, $options['page'], $options['count'], $options['options']);
-  if (!isset($search_result->collections) || !is_array($search_result->collections)) {
-    watchdog('ding_serendipity', 'BAD Search:@query', array('@query' => $query), WATCHDOG_WARNING);
-  }
-  else {
-/*
-    // @todo enable this
-  
-    // Randomize 
-    if ($options['shuffle'] == true) {
-      shuffle($search_result->collections);
-    }
-    // Limit result
-    if (count($search_result->collections) > $options['limit']) {
-      array_slice($search_result->collections,$options['limit']);
-    }
-*/
-    foreach ($search_result->collections as $id => $collection) {
-      $results[] = array('type' => 'ting_object', 'id' => $id);
-    }
-  }
-  return $results;
+/**
+ * Implements hook_init().
+ *
+ * Initate the first isslow, so the 'default' group is set.
+ */
+function ding_serendipity_init() {
+  ding_serendipity_isslow();
 }

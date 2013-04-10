@@ -5,7 +5,36 @@
  * @todo comments below
  */
 
+/**
+ * Get system settings form with serendipity specific settings.
+ */
 function ding_serendipity_admin_form($form, &$form_state) {
+  $form['ding_serendipity_enable_cache'] = array(
+    '#type' => 'checkbox', 
+    '#title' => t('Enable cache'), 
+    '#description' => t('Allow the serendipity functionality to cache results to boost performance.'),
+    '#default_value' => variable_get('ding_serendipity_enable_cache', 0), 
+  );
+  $form['ding_serendipity_cache_lifetime'] = array(
+    '#type' => 'textfield', 
+    '#title' => t('Cache lifetime'), 
+    '#description' => t('Enter the amount of miliseconds you want the serendipity cache to last.'),
+    '#default_value' => variable_get('ding_serendipity_cache_lifetime', 600), 
+  );
+  $form['ding_serendipity_isslow_timeout'] = array(
+    '#type' => 'textfield', 
+    '#title' => t('Is slow limit'), 
+    '#description' => t('Enter the amount of microseconds you want the serendipity functionality to be limited to.'),
+    '#default_value' => variable_get('ding_serendipity_isslow_timeout', 10), 
+  );
+  
+  return system_settings_form($form);
+}
+
+/**
+ * Get an overview of the current registered serendipity functions and keys.
+ */
+function ding_serendipity_admin_overview($form, &$form_state) {
   $info = ding_serendipity_get_info();
   
   $form['calls'] = array(
